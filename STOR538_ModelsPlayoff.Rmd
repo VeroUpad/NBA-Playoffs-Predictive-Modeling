@@ -1,0 +1,128 @@
+---
+title: "STOR538_ModelsPlayoff"
+author: "Veronica Upadhyay"
+date: "2025-02-28"
+output: html_document
+---
+
+```{r}
+library(readr)
+library(dplyr)
+library(stringr)
+library(caret)
+```
+
+```{r}
+NBA_DATA <- read_csv("/Users/veronicaupadhyay/Downloads/STOR 538 Playoff/NBA_Data.csv.gz")
+```
+
+Multiple Linear Regression
+```{r}
+### IMportant data reorganization step
+nba_team_data <- NBA_DATA %>%
+  group_by(gameId, teamTricode) %>%
+  summarize(
+    total_points = sum(points, na.rm = TRUE),
+    total_rebounds = sum(reboundsTotal, na.rm = TRUE),
+    total_assists = sum(assists, na.rm = TRUE),
+    total_turnovers = sum(turnovers, na.rm = TRUE),
+    total_steals = sum(steals, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+nba_spread_data <- nba_team_data %>%
+  left_join(nba_team_data, by = "gameId", suffix = c("_home", "_away")) %>% # YOU HAVE TO TALK ABOUT EVERYTHING ON THIS LINE AND ABOVE IN THE DATA SETCTION!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+  mutate(
+    Spread = total_points_home - total_points_away,  
+    rebound_diff = total_rebounds_home - total_rebounds_away,
+    assist_diff = total_assists_home - total_assists_away,
+    turnover_diff = total_turnovers_home - total_turnovers_away,
+    steal_diff = total_steals_home - total_steals_away
+  )
+#------------------------------------------
+
+set.seed(123)
+train_index <- createDataPartition(nba_spread_data$Spread, p = 0.8, list = FALSE)
+train_data <- nba_spread_data[train_index, ]
+test_data <- nba_spread_data[-train_index, ]
+
+# ---- train and test data
+```
+
+```{r}
+lm_model <- lm(Spread ~ rebound_diff + assist_diff + turnover_diff + steal_diff, data = train_data)
+
+# summary(lm_model)
+predictions <- predict(lm_model, test_data)
+
+# use MEA to evaluate model
+mae <- mean(abs(predictions - test_data$Spread))
+print(mae)
+```
+
+Random Forest
+takes a long time to run because its considering a whole bunch of combinations of decision tree layouts
+```{r}
+library(randomForest)
+
+set.seed(123)
+rf_model <- randomForest(Spread ~ rebound_diff + assist_diff + turnover_diff + steal_diff, 
+                         data = train_data, ntree = 500, mtry = 2, importance = TRUE)
+
+print(rf_model)
+
+importance(rf_model)
+
+rf_predictions <- predict(rf_model, test_data)
+
+# use MEA to evaluate model
+rf_mae <- mean(abs(rf_predictions - test_data$Spread))
+print(paste(rf_mae))
+
+# ----------------------- you can plot any of the trees
+library(rpart.plot)
+
+# Extract a single tree (e.g., the 1st tree) from the random forest
+single_tree <- getTree(rf_model, k = 1, labelVar = TRUE)
+
+# Print the extracted tree
+print(single_tree)
+
+
+tree_model <- rpart(Spread ~ rebound_diff + assist_diff + turnover_diff + steal_diff, 
+                    data = train_data, method = "anova")
+
+# Plot the decision tree
+rpart.plot(tree_model, type = 3, extra = 101, under = TRUE, tweak = 1.2)
+
+
+library(rpart)
+tree_model <- rpart(Spread ~ rebound_diff + assist_diff + turnover_diff + steal_diff, data = train_data)
+print(tree_model)
+plot(tree_model)
+text(tree_model, use.n = TRUE)
+
+```
+
+```{r}
+library(glmnet)
+
+x_train <- as.matrix(train_data[, c("rebound_diff", "assist_diff", "turnover_diff", "steal_diff")])
+y_train <- train_data$Spread
+
+x_test <- as.matrix(test_data[, c("rebound_diff", "assist_diff", "turnover_diff", "steal_diff")])
+y_test <- test_data$Spread
+
+set.seed(123)
+ridge_model <- cv.glmnet(x_train, y_train, alpha = 0)
+
+ridge_predictions <- predict(ridge_model, x_test, s = "lambda.min")
+
+ridge_mae <- mean(abs(ridge_predictions - y_test))
+print(paste("Ridge Regression MAE:", ridge_mae))
+
+plot(ridge_model$glmnet.fit, xvar = "lambda", label = TRUE)
+legend("topright", legend = colnames(x_train), col = 1:4, lty = 1, cex = 0.8)
+
+```
+
